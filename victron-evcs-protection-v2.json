@@ -1,0 +1,356 @@
+[
+  {
+    "id": "tab_victron_native",
+    "type": "tab",
+    "label": "Victron EVCS Protection (Nœuds Victron)",
+    "disabled": false,
+    "info": "Utilise les nœuds Victron officiels pour gérer la protection batterie EVCS"
+  },
+  {
+    "id": "ui_tab_victron",
+    "type": "ui_tab",
+    "name": "Victron EVCS",
+    "icon": "dashboard",
+    "order": 1,
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "ui_group_control",
+    "type": "ui_group",
+    "name": "Contrôle EVCS",
+    "tab": "ui_tab_victron",
+    "order": 1,
+    "disp": true,
+    "width": "6",
+    "collapse": false
+  },
+  {
+    "id": "ui_group_monitoring",
+    "type": "ui_group",
+    "name": "Monitoring",
+    "tab": "ui_tab_victron",
+    "order": 2,
+    "disp": true,
+    "width": "6",
+    "collapse": false
+  },
+  {
+    "id": "switch_protection",
+    "type": "ui_switch",
+    "z": "tab_victron_native",
+    "name": "Switch Protection Batterie",
+    "label": "Protection batterie EVCS",
+    "tooltip": "Empêche la batterie de se décharger pour l'EVCS",
+    "group": "ui_group_control",
+    "order": 1,
+    "width": 0,
+    "height": 0,
+    "passthru": true,
+    "decouple": "false",
+    "topic": "protection",
+    "style": "",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "onicon": "lock",
+    "oncolor": "green",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "officon": "lock_open",
+    "offcolor": "grey",
+    "animate": true,
+    "x": 180,
+    "y": 80,
+    "wires": [
+      [
+        "fn_store_mode"
+      ]
+    ]
+  },
+  {
+    "id": "fn_store_mode",
+    "type": "function",
+    "z": "tab_victron_native",
+    "name": "Stocker mode",
+    "func": "flow.set('protection_active', msg.payload === true);\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 400,
+    "y": 80,
+    "wires": [
+      [
+        "fn_recalculate"
+      ]
+    ]
+  },
+  {
+    "id": "victron_input_consumption",
+    "type": "victron-input-system",
+    "z": "tab_victron_native",
+    "service": "com.victronenergy.system",
+    "path": "/Ac/Consumption/L1/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system",
+      "name": "System"
+    },
+    "pathObj": {
+      "path": "/Ac/Consumption/L1/Power",
+      "type": "float",
+      "name": "AC Consumption L1 (W)"
+    },
+    "name": "Consommation Maison",
+    "onlyChanges": false,
+    "x": 180,
+    "y": 180,
+    "wires": [
+      [
+        "fn_store_consumption",
+        "ui_gauge_house"
+      ]
+    ]
+  },
+  {
+    "id": "fn_store_consumption",
+    "type": "function",
+    "z": "tab_victron_native",
+    "name": "Stocker conso",
+    "func": "const power = Number(msg.payload) || 0;\nflow.set('house_power', power);\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 410,
+    "y": 180,
+    "wires": [
+      [
+        "fn_recalculate"
+      ]
+    ]
+  },
+  {
+    "id": "victron_input_evcs",
+    "type": "victron-input-evcharger",
+    "z": "tab_victron_native",
+    "service": "com.victronenergy.evcharger",
+    "path": "/Ac/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.evcharger",
+      "name": "EV Charger"
+    },
+    "pathObj": {
+      "path": "/Ac/Power",
+      "type": "float",
+      "name": "AC Power (W)"
+    },
+    "name": "Puissance EVCS",
+    "onlyChanges": false,
+    "x": 180,
+    "y": 240,
+    "wires": [
+      [
+        "fn_store_evcs",
+        "ui_gauge_evcs"
+      ]
+    ]
+  },
+  {
+    "id": "fn_store_evcs",
+    "type": "function",
+    "z": "tab_victron_native",
+    "name": "Stocker EVCS",
+    "func": "const power = Number(msg.payload) || 0;\nflow.set('evcs_power', power);\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 410,
+    "y": 240,
+    "wires": [
+      [
+        "fn_recalculate"
+      ]
+    ]
+  },
+  {
+    "id": "fn_recalculate",
+    "type": "function",
+    "z": "tab_victron_native",
+    "name": "Calculer limite décharge",
+    "func": "const protectionActive = flow.get('protection_active') || false;\nconst housePower = flow.get('house_power') || 0;\nconst evcsPower = flow.get('evcs_power') || 0;\n\nlet maxDischargePower;\nlet status;\n\nif (protectionActive) {\n    // Mode protection : batterie limitée à la consommation maison\n    maxDischargePower = Math.max(0, housePower);\n    status = `🔒 Protection ON - Batterie limitée à ${Math.round(housePower)}W (maison uniquement)`;\n} else {\n    // Mode normal : pas de limite (valeur élevée)\n    maxDischargePower = 100000; // 100kW = pas de limite pratique\n    status = `🔓 Mode normal - Batterie alimente maison (${Math.round(housePower)}W) + EVCS (${Math.round(evcsPower)}W)`;\n}\n\n// Sortie 1 : Pour le nœud Victron (valeur simple)\nconst msgVictron = {\n    payload: maxDischargePower\n};\n\n// Sortie 2 : Pour UI et debug (objet complet)\nconst msgUI = {\n    payload: {\n        value: maxDischargePower,\n        status: status,\n        housePower: housePower,\n        evcsPower: evcsPower,\n        protection: protectionActive\n    }\n};\n\nreturn [msgVictron, msgUI];",
+    "outputs": 2,
+    "noerr": 0,
+    "x": 680,
+    "y": 180,
+    "wires": [
+      [
+        "victron_output_ess"
+      ],
+      [
+        "ui_status",
+        "debug_limit"
+      ]
+    ]
+  },
+  {
+    "id": "victron_output_ess",
+    "type": "victron-output-settings",
+    "z": "tab_victron_native",
+    "service": "com.victronenergy.settings",
+    "path": "/Settings/CGwacs/MaxDischargePower",
+    "serviceObj": {
+      "service": "com.victronenergy.settings",
+      "name": "Settings"
+    },
+    "pathObj": {
+      "path": "/Settings/CGwacs/MaxDischargePower",
+      "type": "float",
+      "name": "ESS maximum discharge power (W)",
+      "writable": true
+    },
+    "name": "Limite décharge ESS",
+    "onlyChanges": false,
+    "x": 1000,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "ui_status",
+    "type": "ui_text",
+    "z": "tab_victron_native",
+    "group": "ui_group_control",
+    "order": 2,
+    "width": 0,
+    "height": 0,
+    "name": "Statut",
+    "label": "",
+    "format": "{{msg.payload.status}}",
+    "layout": "row-spread",
+    "x": 960,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "ui_gauge_house",
+    "type": "ui_gauge",
+    "z": "tab_victron_native",
+    "name": "Gauge Maison",
+    "group": "ui_group_monitoring",
+    "order": 1,
+    "width": 0,
+    "height": 0,
+    "gtype": "gage",
+    "title": "Consommation Maison",
+    "label": "W",
+    "format": "{{value}}",
+    "min": 0,
+    "max": "5000",
+    "colors": [
+      "#00b500",
+      "#e6e600",
+      "#ca3838"
+    ],
+    "seg1": "1500",
+    "seg2": "3000",
+    "x": 410,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "ui_gauge_evcs",
+    "type": "ui_gauge",
+    "z": "tab_victron_native",
+    "name": "Gauge EVCS",
+    "group": "ui_group_monitoring",
+    "order": 2,
+    "width": 0,
+    "height": 0,
+    "gtype": "gage",
+    "title": "Puissance EVCS",
+    "label": "W",
+    "format": "{{value}}",
+    "min": 0,
+    "max": "11000",
+    "colors": [
+      "#00b500",
+      "#e6e600",
+      "#ca3838"
+    ],
+    "seg1": "3500",
+    "seg2": "7000",
+    "x": 400,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "debug_limit",
+    "type": "debug",
+    "z": "tab_victron_native",
+    "name": "Debug limite",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 980,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "victron_input_battery_soc",
+    "type": "victron-input-battery",
+    "z": "tab_victron_native",
+    "service": "com.victronenergy.battery",
+    "path": "/Soc",
+    "serviceObj": {
+      "service": "com.victronenergy.battery",
+      "name": "Battery"
+    },
+    "pathObj": {
+      "path": "/Soc",
+      "type": "float",
+      "name": "State of charge (%)"
+    },
+    "name": "État batterie (SOC)",
+    "onlyChanges": false,
+    "x": 180,
+    "y": 300,
+    "wires": [
+      [
+        "ui_gauge_battery"
+      ]
+    ]
+  },
+  {
+    "id": "ui_gauge_battery",
+    "type": "ui_gauge",
+    "z": "tab_victron_native",
+    "name": "Gauge Batterie SOC",
+    "group": "ui_group_monitoring",
+    "order": 3,
+    "width": 0,
+    "height": 0,
+    "gtype": "gage",
+    "title": "État batterie",
+    "label": "%",
+    "format": "{{value}}",
+    "min": 0,
+    "max": "100",
+    "colors": [
+      "#ca3838",
+      "#e6e600",
+      "#00b500"
+    ],
+    "seg1": "30",
+    "seg2": "70",
+    "x": 420,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "comment_info",
+    "type": "comment",
+    "z": "tab_victron_native",
+    "name": "ℹ️ Protection batterie EVCS - Version corrigée pour nœuds Victron",
+    "info": "# Fonctionnement\n\n**Mode Protection ACTIF** :\n- La batterie alimente UNIQUEMENT la maison\n- L'EVCS doit utiliser le réseau/solaire\n- Limite ESS = consommation maison\n\n**Mode Normal** :\n- La batterie peut alimenter maison + EVCS\n- Limite ESS = 100kW (pas de limite pratique)\n\n**Correction** :\n- La fonction de calcul a maintenant 2 sorties\n- Sortie 1 : valeur simple pour le nœud Victron\n- Sortie 2 : objet complet pour UI et debug",
+    "x": 350,
+    "y": 40,
+    "wires": []
+  }
+]

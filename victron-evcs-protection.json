@@ -1,0 +1,363 @@
+[
+  {
+    "id": "tab_victron_evcs_smart",
+    "type": "tab",
+    "label": "Victron EVCS Smart Discharge",
+    "disabled": false,
+    "info": "Gère la décharge batterie : autorise la consommation maison, bloque l'EVCS"
+  },
+  {
+    "id": "ui_tab_victron_smart",
+    "type": "ui_tab",
+    "name": "Victron EVCS",
+    "icon": "dashboard",
+    "order": 1,
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "ui_group_evcs_smart",
+    "type": "ui_group",
+    "name": "Contrôle EVCS / Batterie",
+    "tab": "ui_tab_victron_smart",
+    "order": 1,
+    "disp": true,
+    "width": "6",
+    "collapse": false,
+    "className": ""
+  },
+  {
+    "id": "switch_protect_battery",
+    "type": "ui_switch",
+    "z": "tab_victron_evcs_smart",
+    "name": "Protection batterie EVCS",
+    "label": "Bloquer décharge batterie pour EVCS",
+    "tooltip": "Actif : batterie alimente la maison uniquement, pas l'EVCS",
+    "group": "ui_group_evcs_smart",
+    "order": 1,
+    "width": 0,
+    "height": 0,
+    "passthru": true,
+    "decouple": "false",
+    "topic": "evcs_protection",
+    "style": "",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "onicon": "lock",
+    "oncolor": "green",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "officon": "lock_open",
+    "offcolor": "grey",
+    "animate": true,
+    "className": "",
+    "x": 230,
+    "y": 80,
+    "wires": [
+      [
+        "fn_update_protection_mode"
+      ]
+    ]
+  },
+  {
+    "id": "fn_update_protection_mode",
+    "type": "function",
+    "z": "tab_victron_evcs_smart",
+    "name": "MàJ mode protection",
+    "func": "// Stocke l'état du mode protection dans le contexte\nconst protectionActive = msg.payload === true;\nflow.set(\"evcs_protection_active\", protectionActive);\n\nmsg.payload = {\n    protection: protectionActive,\n    timestamp: new Date().toISOString()\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 80,
+    "wires": [
+      [
+        "trigger_calculation"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_house_consumption",
+    "type": "mqtt in",
+    "z": "tab_victron_evcs_smart",
+    "name": "Consommation maison",
+    "topic": "victron/system/Ac/Consumption/L1/Power",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_victron_smart",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 200,
+    "y": 180,
+    "wires": [
+      [
+        "fn_store_house_power"
+      ]
+    ]
+  },
+  {
+    "id": "fn_store_house_power",
+    "type": "function",
+    "z": "tab_victron_evcs_smart",
+    "name": "Stocker conso maison",
+    "func": "// Stocke la consommation actuelle de la maison\nlet housePower = 0;\n\nif (typeof msg.payload === 'object' && msg.payload.value !== undefined) {\n    housePower = Number(msg.payload.value) || 0;\n} else {\n    housePower = Number(msg.payload) || 0;\n}\n\nflow.set(\"house_consumption\", housePower);\n\nmsg.payload = {\n    housePower: housePower,\n    timestamp: new Date().toISOString()\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 180,
+    "wires": [
+      [
+        "trigger_calculation"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_in_evcs_power",
+    "type": "mqtt in",
+    "z": "tab_victron_evcs_smart",
+    "name": "Puissance EVCS",
+    "topic": "victron/evcharger/+/Ac/Power",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "mqtt_broker_victron_smart",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 200,
+    "y": 240,
+    "wires": [
+      [
+        "fn_store_evcs_power"
+      ]
+    ]
+  },
+  {
+    "id": "fn_store_evcs_power",
+    "type": "function",
+    "z": "tab_victron_evcs_smart",
+    "name": "Stocker puissance EVCS",
+    "func": "// Stocke la puissance actuelle du chargeur EVCS\nlet evcsPower = 0;\n\nif (typeof msg.payload === 'object' && msg.payload.value !== undefined) {\n    evcsPower = Number(msg.payload.value) || 0;\n} else {\n    evcsPower = Number(msg.payload) || 0;\n}\n\nflow.set(\"evcs_power\", evcsPower);\n\nmsg.payload = {\n    evcsPower: evcsPower,\n    timestamp: new Date().toISOString()\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 240,
+    "wires": [
+      [
+        "trigger_calculation"
+      ]
+    ]
+  },
+  {
+    "id": "trigger_calculation",
+    "type": "function",
+    "z": "tab_victron_evcs_smart",
+    "name": "Déclencher calcul",
+    "func": "// Déclenche le calcul de la limite de décharge\n// seulement si toutes les données sont disponibles\n\nconst housePower = flow.get(\"house_consumption\") || 0;\nconst evcsPower = flow.get(\"evcs_power\") || 0;\nconst protectionActive = flow.get(\"evcs_protection_active\") || false;\n\nmsg.payload = {\n    housePower: housePower,\n    evcsPower: evcsPower,\n    protectionActive: protectionActive,\n    timestamp: new Date().toISOString()\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 740,
+    "y": 180,
+    "wires": [
+      [
+        "fn_calculate_discharge_limit"
+      ]
+    ]
+  },
+  {
+    "id": "fn_calculate_discharge_limit",
+    "type": "function",
+    "z": "tab_victron_evcs_smart",
+    "name": "Calculer limite décharge batterie",
+    "func": "// Récupère les valeurs\nconst housePower = msg.payload.housePower || 0;\nconst evcsPower = msg.payload.evcsPower || 0;\nconst protectionActive = msg.payload.protectionActive || false;\n\nlet maxDischargePower = null;\nlet mode = \"normal\";\nlet explanation = \"\";\n\nif (protectionActive) {\n    // Mode protection actif :\n    // On limite la décharge de la batterie à la consommation de la maison UNIQUEMENT\n    // En soustrayant la puissance de l'EVCS de la décharge totale autorisée\n    \n    // La batterie peut fournir la maison, mais pas l'EVCS\n    maxDischargePower = housePower;\n    mode = \"protected\";\n    explanation = `Protection active : batterie limitée à ${housePower}W (maison uniquement, EVCS ${evcsPower}W exclu)`;\n    \n} else {\n    // Mode normal : pas de limite, la batterie peut alimenter maison + EVCS\n    maxDischargePower = null; // ou une valeur par défaut haute si nécessaire\n    mode = \"normal\";\n    explanation = `Mode normal : batterie alimente maison (${housePower}W) + EVCS (${evcsPower}W)`;\n}\n\n// Message de sortie pour le système Victron\nmsg.payload = {\n    maxDischargePower: maxDischargePower,\n    housePower: housePower,\n    evcsPower: evcsPower,\n    mode: mode,\n    explanation: explanation,\n    timestamp: new Date().toISOString()\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 280,
+    "y": 340,
+    "wires": [
+      [
+        "mqtt_out_victron_ess",
+        "debug_discharge_limit",
+        "ui_text_status"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_out_victron_ess",
+    "type": "mqtt out",
+    "z": "tab_victron_evcs_smart",
+    "name": "Commande ESS Victron",
+    "topic": "W/+/settings/0/Settings/CGwacs/MaxDischargePower",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "mqtt_broker_victron_smart",
+    "x": 650,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "debug_discharge_limit",
+    "type": "debug",
+    "z": "tab_victron_evcs_smart",
+    "name": "Limite décharge",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 640,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "ui_text_status",
+    "type": "ui_text",
+    "z": "tab_victron_evcs_smart",
+    "group": "ui_group_evcs_smart",
+    "order": 2,
+    "width": 0,
+    "height": 0,
+    "name": "Statut protection",
+    "label": "Statut",
+    "format": "{{msg.payload.explanation}}",
+    "layout": "row-spread",
+    "className": "",
+    "x": 640,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "ui_gauge_house",
+    "type": "ui_gauge",
+    "z": "tab_victron_evcs_smart",
+    "name": "Conso maison",
+    "group": "ui_group_evcs_smart",
+    "order": 3,
+    "width": 0,
+    "height": 0,
+    "gtype": "gage",
+    "title": "Consommation maison",
+    "label": "W",
+    "format": "{{value}}",
+    "min": 0,
+    "max": "5000",
+    "colors": [
+      "#00b500",
+      "#e6e600",
+      "#ca3838"
+    ],
+    "seg1": "1500",
+    "seg2": "3000",
+    "diff": false,
+    "className": "",
+    "x": 740,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "ui_gauge_evcs",
+    "type": "ui_gauge",
+    "z": "tab_victron_evcs_smart",
+    "name": "Puissance EVCS",
+    "group": "ui_group_evcs_smart",
+    "order": 4,
+    "width": 0,
+    "height": 0,
+    "gtype": "gage",
+    "title": "Puissance EVCS",
+    "label": "W",
+    "format": "{{value}}",
+    "min": 0,
+    "max": "11000",
+    "colors": [
+      "#00b500",
+      "#e6e600",
+      "#ca3838"
+    ],
+    "seg1": "3500",
+    "seg2": "7000",
+    "diff": false,
+    "className": "",
+    "x": 740,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "inject_house_store",
+    "type": "link in",
+    "z": "tab_victron_evcs_smart",
+    "name": "link_house_to_gauge",
+    "links": [],
+    "x": 575,
+    "y": 180,
+    "wires": [
+      [
+        "ui_gauge_house"
+      ]
+    ]
+  },
+  {
+    "id": "inject_evcs_store",
+    "type": "link in",
+    "z": "tab_victron_evcs_smart",
+    "name": "link_evcs_to_gauge",
+    "links": [],
+    "x": 575,
+    "y": 240,
+    "wires": [
+      [
+        "ui_gauge_evcs"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_broker_victron_smart",
+    "type": "mqtt-broker",
+    "name": "Broker MQTT Victron",
+    "broker": "venus.local",
+    "port": "1883",
+    "clientid": "node-red-victron-smart",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "sessionExpiry": ""
+  }
+]
